@@ -10,102 +10,106 @@ const express = require('express');
 const axios = require('axios');
 const config = require('./config');
 
-let sock = null; // 保持 socket 實例，方便重連時關閉
+let sock;  // 使用全域變數，以免被 override
 
 async function startWhatsAppBot() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+  const { version } = await fetchLatestBaileysVersion();
+  console.log();
 
-  const { version, isLatest } = await fetchLatestBaileysVersion();
-  console.log(`Using WhatsApp Baileys version: ${version.join('.')}, isLatest: ${isLatest}`);
-
+  // 建立 socket，設定全域 sock
   sock = makeWASocket({
-    logger: P({ level: 'silent' }),
+    version,
+    logger: P({ level: 'debug' }),
     printQRInTerminal: true,
     auth: state,
-    version,
   });
 
   // Express API Server
   const app = express();
   app.use(express.json());
-
-  // 全域錯誤中介軟體
   app.use((err, req, res, next) => {
     console.error('Express error:', err);
     res.status(500).send('Internal Server Error');
   });
 
-  // Telegram Bot 傳來的訊息，轉發 WhatsApp 群組
+  // Telegram -> WhatsApp 轉發 API
   app.post('/fromTelegram', async (req, res) => {
+    const { message } = req.body;
+    if (!message) return res.status(400).send('Missing message');
+
     try {
-      const { message } = req.body;
-      if (!message) return res.status(400).send('Missing message');
+      console.log('🔄 Telegram->WhatsApp 發送:', message);
       await sock.sendMessage(config.whatsapp.chatId, { text: message });
       res.sendStatus(200);
     } catch (err) {
-      console.error('Error sending message to WhatsApp group:', err);
+      console.error('Error sending message to WhatsApp group:', err.message || err);
       res.sendStatus(500);
     }
   });
 
   app.listen(config.whatsapp.port, () => {
-    console.log(`WhatsApp API Server running on port ${config.whatsapp.port}`);
+    console.log();
   });
 
+  // 保存憑證
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect } = update;
+  // 連線狀態
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update;
+    if (qr) {
+      console.log('請使用 WhatsApp 掃描下方 QR Code：');
+ }
+    if (connection === 'open') {
+      console.log('WhatsApp connected successfully.');
+      // 測試群組發送
+      try {
+        await sock.sendMessage(config.whatsapp.chatId, { text: '已上線' });
+        console.log('測試上線訊息發送成功');
+      } catch (err) {
+        console.error('❌ 測試訊息發送失敗:', err.message || err);
+      }
+    }
     if (connection === 'close') {
       const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+      console.log('WhatsApp connection closed:', lastDisconnect?.error?.toString());
       if (shouldReconnect) {
-        console.log('WhatsApp connection closed. Reconnecting...');
-        setTimeout(() => {
-          if(sock) {
-            sock.ws.close();
-          }
-          startWhatsAppBot();
-        }, 5000);
+        console.log('重連中...');
+        startWhatsAppBot();
       } else {
-        console.log('WhatsApp logged out. Please re-login.');
+        console.log('WhatsApp 已登出，請重新掃描登入');
       }
-    } else if (connection === 'open') {
-      console.log('WhatsApp connected successfully.');
     }
   });
 
   // 監聽 WhatsApp 群組訊息
-  sock.ev.on('messages.upsert', async (m) => {
+  sock.ev.on('messages.upsert', async ({ messages }) => {
     try {
-      const messages = m.messages;
-      if (!messages || messages.length === 0) return;
-
       const msg = messages[0];
       if (!msg.message || msg.key.fromMe) return;
 
       const from = msg.key.remoteJid;
+      console.log('📩 來自 ID:', from);
       if (from !== config.whatsapp.chatId) return;
-
-      let senderName = msg.pushName || 'Unknown';
-
-      // 支援多種文字訊息類型
+ // 擷取文字
       let text = '';
       if (msg.message.conversation) text = msg.message.conversation;
       else if (msg.message.extendedTextMessage) text = msg.message.extendedTextMessage.text;
       else if (msg.message.imageMessage?.caption) text = msg.message.imageMessage.caption;
       else if (msg.message.videoMessage?.caption) text = msg.message.videoMessage.caption;
-      else if (msg.message.buttonsResponseMessage) text = msg.message.buttonsResponseMessage.selectedButtonId;
-      else if (msg.message.listResponseMessage) text = msg.message.listResponseMessage.singleSelectReply.selectedRowId;
 
       if (!text) return;
-
+      const senderName = msg.pushName || 'Unknown';
       const formattedMsg = `[${senderName}: ${text}]`;
 
+      console.log('🔄 WhatsApp->Telegram 轉發:', formattedMsg);
       await axios.post(`http://localhost:${config.telegram.port}/fromWhatsApp`, { message: formattedMsg });
     } catch (err) {
-      console.error('Error forwarding message to Telegram bot:', err.message);
+      console.error('Error forwarding message to Telegram bot:', err.message || err);
     }
   });
 }
 
 startWhatsAppBot();
+
