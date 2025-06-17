@@ -1,3 +1,4 @@
+// telegramBot.js
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const axios = require('axios');
@@ -7,10 +8,17 @@ const bot = new TelegramBot(config.telegram.token, { polling: true });
 const app = express();
 app.use(express.json());
 
-// API Server 接收 WhatsApp 傳來的訊息，發送至 Telegram 群組
+// 錯誤處理中介軟體
+app.use((err, req, res, next) => {
+  console.error('Express error:', err);
+  res.status(500).send('Internal Server Error');
+});
+
+// Telegram 端 API Server，接收 WhatsApp 訊息，轉發至 Telegram 群組
 app.post('/fromWhatsApp', async (req, res) => {
   try {
     const { message } = req.body;
+    if (!message) return res.status(400).send('Missing message');
     await bot.sendMessage(config.telegram.chatId, message);
     res.sendStatus(200);
   } catch (err) {
@@ -25,14 +33,16 @@ app.listen(config.telegram.port, () => {
 
 // 監聽 Telegram 群組訊息，轉發給 WhatsApp Bot API
 bot.on('message', async (msg) => {
-  if (msg.chat.id.toString() !== config.telegram.chatId) return; // 只處理設定群組
-  if (msg.from.is_bot) return; // 忽略機器人訊息
-
-  const sender = msg.from.first_name || 'Unknown';
-  const text = msg.text || '';
-  const formattedMsg = `[${sender}: ${text}]`;
-
   try {
+    if (msg.chat.id.toString() !== config.telegram.chatId) return;
+    if (msg.from.is_bot) return;
+
+    const sender = msg.from.first_name || 'Unknown';
+    const text = msg.text || '';
+    if (!text.trim()) return;
+
+    const formattedMsg = `[${sender}: ${text}]`;
+
     await axios.post(`http://localhost:${config.whatsapp.port}/fromTelegram`, { message: formattedMsg });
   } catch (err) {
     console.error('Error forwarding message to WhatsApp bot:', err.message);
