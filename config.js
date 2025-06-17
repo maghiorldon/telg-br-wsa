@@ -1,12 +1,14 @@
 // config.js
+require('dotenv').config(); // 載入 .env
+
 module.exports = {
   telegram: {
-    token: '7852353069:AAFEMafncSBX6vsdiO-gzYvx0W3cbC7BQyc',
-    chatId: '-4968958897',
-    port: 3000 // Telegram機器人用API server端口
+    token: process.env.TELEGRAM_TOKEN,
+    chatId: process.env.TELEGRAM_CHAT_ID,
+    port: Number(process.env.TELEGRAM_PORT) || 3000,
   },
   whatsapp: {
-    chatId: 'WhatsApp群組ID', // 例如 '123456789-123456@g.us'
-    port: 4000 // WhatsApp機器人API server端口
+    chatId: process.env.WHATSAPP_CHAT_ID,
+    port: Number(process.env.WHATSAPP_PORT) || 4000,
   }
 };
