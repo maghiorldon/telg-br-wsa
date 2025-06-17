@@ -1,0 +1,13 @@
+{
+  "dependencies": {
+    "@adiwajshing/baileys": "^5.0.0",
+    "@whiskeysockets/baileys": "^6.6.0",
+    "axios": "^1.10.0",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "pino": "^9.7.0",
+    "qrcode-terminal": "^0.12.0",
+    "uuid": "^11.1.0"
+  }
+}
